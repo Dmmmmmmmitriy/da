@@ -1,0 +1,49 @@
+#pragma once
+
+#include <winsock2.h>
+#include <ws2tcpip.h>
+#include <iostream>
+#include <string>
+#include <thread>
+#include <cstring>
+
+#pragma comment(lib, "ws2_32.lib")
+
+#define PORT 8888
+#define BUF_SIZE 1024
+
+struct Message {
+    int type;
+    int length;
+    char data[BUF_SIZE - 8]; 
+};
+
+bool sendMessage(SOCKET sock, const Message& msg) {
+    if (msg.length < 0 || msg.length > (int)sizeof(msg.data))
+        return false;
+    int totalSize = sizeof(int) * 2 + msg.length;
+    int sent = send(sock, (const char*)&msg, totalSize, 0);
+    return sent == totalSize;
+}
+
+bool receiveMessage(SOCKET sock, Message& msg) {
+    char header[8];
+    int received = recv(sock, header, 8, 0);
+    if (received != 8)
+        return false;
+
+    memcpy(&msg.type, header, 4);
+    memcpy(&msg.length, header + 4, 4);
+
+    if (msg.length < 0 || msg.length > (int)sizeof(msg.data))
+        return false;
+
+    int bytesRead = 0;
+    while (bytesRead < msg.length) {
+        int result = recv(sock, msg.data + bytesRead, msg.length - bytesRead, 0);
+        if (result <= 0)
+            return false;
+        bytesRead += result;
+    }
+    return true;
+}
