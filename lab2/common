@@ -1,0 +1,93 @@
+#pragma once
+
+#include <winsock2.h>
+#include <ws2tcpip.h>
+#include <iostream>
+#include <string>
+#include <thread>
+
+#define _WINSOCK_DEPRECATED_NO_WARNINGS
+
+using namespace std;
+
+#pragma comment(lib, "ws2_32.lib")
+
+#define PORT 8888
+#define BUF_SIZE 1024
+
+struct Message {
+    int type;        
+    int length;      
+    char data[BUF_SIZE - 8];  
+};
+
+//Эффективное чтение сообщений
+bool sendMessage(SOCKET sock, const Message& msg) {
+    if (msg.length < 0 || msg.length > BUF_SIZE - 8) {
+        return false;
+    }
+    
+    int totalSize = sizeof(int) * 2 + msg.length;
+    return send(sock, (char*)&msg, totalSize, 0) == totalSize;
+}
+
+bool sendMessage(SOCKET sock, const Message& msg, const sockaddr_in* addr) {
+    if (msg.length < 0 || msg.length > BUF_SIZE - 8) {
+        return false;
+    }
+    
+    int totalSize = sizeof(int) * 2 + msg.length;
+    return sendto(sock, (char*)&msg, totalSize, 0, 
+                  (sockaddr*)addr, sizeof(sockaddr_in)) == totalSize;
+}
+
+
+bool receiveMessage(SOCKET sock, Message& msg) {
+    char header[8];
+    int bytesReceived = recv(sock, header, 8, 0);
+    
+    if (bytesReceived != 8) {
+        return false;
+    }
+    
+    memcpy(&msg.type, header, 4);
+    memcpy(&msg.length, header + 4, 4);
+    
+    //проверяет длину
+    if (msg.length < 0 || msg.length > BUF_SIZE - 8) {
+        return false;
+    }
+    
+    if (msg.length > 0) {
+        recv(sock, msg.data, msg.length, 0);
+    }
+    msg.data[msg.length] = '\0';
+    
+    return true;
+}
+
+bool receiveMessage(SOCKET sock, Message& msg, sockaddr_in* addr, int* addrLen) {
+    char header[8];
+    int len = sizeof(sockaddr_in);
+    int bytesReceived = recvfrom(sock, header, 8, 0, (sockaddr*)addr, &len);
+    
+    if (bytesReceived != 8) {
+        return false;
+    }
+    
+    if (addrLen) *addrLen = len;
+    
+    memcpy(&msg.type, header, 4);
+    memcpy(&msg.length, header + 4, 4);
+    
+    if (msg.length < 0 || msg.length > BUF_SIZE - 8) {
+        return false;
+    }
+    
+    if (msg.length > 0) {
+        recvfrom(sock, msg.data, msg.length, 0, (sockaddr*)addr, addrLen);
+    }
+    msg.data[msg.length] = '\0';
+    
+    return true;
+}
