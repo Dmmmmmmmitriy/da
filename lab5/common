@@ -1,0 +1,100 @@
+#pragma once
+
+#define _WINSOCK_DEPRECATED_NO_WARNINGS
+#include <winsock2.h>
+#include <ws2tcpip.h>
+#include <iostream>
+#include <string>
+#include <vector>
+#include <thread>
+#include <mutex>
+#include <algorithm>
+#include <cstring>
+
+#pragma comment(lib, "ws2_32.lib")
+
+using namespace std;
+
+// Константы
+const int PORT = 12345;
+const int MAX_CLIENTS = 10;
+const int TIMEOUT_MS = 30000;          // 30 секунд
+const int BUF_SIZE = 1024;              // Общий размер буфера данных
+const int MAX_NICK_LEN = 32;            // Максимальная длина ника
+
+// Типы пакетов
+enum PacketType : int {
+    PT_NICK = 1,        // Клиент -> Сервер: передача ника
+    PT_JOIN,            // Сервер -> Клиенты: новый участник
+    PT_LEFT,            // Сервер -> Клиенты: участник покинул чат
+    PT_PUBLIC,          // Клиент -> Сервер / Сервер -> Клиенты: публичное сообщение
+    PT_PRIVATE,         // Клиент -> Сервер / Сервер -> Клиенты: приватное сообщение
+    PT_ERROR,           // Сервер -> Клиент: ошибка
+    PT_STATS,           // Клиент -> Сервер: запрос статистики / Сервер -> Клиент: ответ со статистикой
+    PT_INFO             // Сервер -> Клиент: информационное сообщение
+};
+
+// Структура сообщения
+struct Message {
+    int type;           // Тип пакета (см. PacketType)
+    int length;         // Длина данных (без нуль-терминатора)
+    char data[BUF_SIZE - 8];  // Данные (не более 1016 байт)
+};
+
+// Отправка точного количества байт (с циклом)
+bool sendAll(SOCKET sock, const char* buffer, int size) {
+    int sent = 0;
+    while (sent < size) {
+        int result = send(sock, buffer + sent, size - sent, 0);
+        if (result == SOCKET_ERROR) return false;
+        sent += result;
+    }
+    return true;
+}
+
+// Приём точного количества байт (с циклом)
+bool recvAll(SOCKET sock, char* buffer, int size) {
+    int received = 0;
+    while (received < size) {
+        int result = recv(sock, buffer + received, size - received, 0);
+        if (result <= 0) return false;  // 0 = соединение закрыто, -1 = ошибка
+        received += result;
+    }
+    return true;
+}
+
+// Отправка сообщения (TCP)
+bool sendMessage(SOCKET sock, const Message& msg) {
+    if (msg.length < 0 || msg.length > (int)(sizeof(msg.data))) return false;
+    int totalSize = sizeof(int) * 2 + msg.length; // type + length + данные
+    return sendAll(sock, reinterpret_cast<const char*>(&msg), totalSize);
+}
+
+// Приём сообщения (TCP)
+bool receiveMessage(SOCKET sock, Message& msg) {
+    // Читаем заголовок (8 байт: type + length)
+    char header[8];
+    if (!recvAll(sock, header, 8)) return false;
+
+    memcpy(&msg.type, header, 4);
+    memcpy(&msg.length, header + 4, 4);
+
+    if (msg.length < 0 || msg.length > (int)(sizeof(msg.data))) return false;
+
+    // Читаем данные
+    if (msg.length > 0) {
+        if (!recvAll(sock, msg.data, msg.length)) return false;
+    }
+    msg.data[msg.length] = '\0'; // Добавляем завершающий ноль для удобства
+    return true;
+}
+
+// Установка тайм-аутов на сокет
+bool setSocketTimeout(SOCKET sock, int timeoutMs) {
+    DWORD timeout = timeoutMs;
+    if (setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, (char*)&timeout, sizeof(timeout)) == SOCKET_ERROR)
+        return false;
+    if (setsockopt(sock, SOL_SOCKET, SO_SNDTIMEO, (char*)&timeout, sizeof(timeout)) == SOCKET_ERROR)
+        return false;
+    return true;
+}
